@@ -1,0 +1,10 @@
+{
+    "ftpUserConfig": {
+        "host": "",
+        "port": 0,
+        "user": "",
+        "password": "",
+        "secure": false,
+        "rootRemote": ""
+    }
+}
