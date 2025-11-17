@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Argumentos: mensagem e timeout
-const args = process.argv.slice(2);
+const args = process.argv.slice(2); 
 const message = args[0] || "✔ Operação concluída!";
 const timeout = parseInt(args[1]) || 3000;
 

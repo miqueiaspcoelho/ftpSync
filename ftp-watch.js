@@ -95,7 +95,7 @@ async function uploadFile(filePath) {
 
 // ------------------------------
 // Inicializa watcher
-// ------------------------------
+// // ------------------------------
 const watcher = chokidar.watch(projectsRoot, { ignored, ignoreInitial: true });
 
 watcher.on('add', uploadFile);
