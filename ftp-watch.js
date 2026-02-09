@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ftp = require('basic-ftp');
 const ftpSyncConfigJson = path.join(__dirname, 'ftp-watch-settings.json');
+const updateStatusBarConfigFile = path.join(__dirname, 'ftp-watch-settings.json');
 const chokidar = require('chokidar');
 const { exec } = require('child_process');
 
@@ -18,6 +19,10 @@ const ftpConfig = {
     secure: ftpUserConfig.secure,
     rootRemote: ftpUserConfig.rootRemote // pasta raiz no FTP
 };
+
+// Configuração de exibição de status na extensão status bar
+const userUpdateStatusBarConfig = JSON.parse(fs.readFileSync(updateStatusBarConfigFile, 'utf-8'));
+const updateStatusBarExtensionConfig = userUpdateStatusBarConfig.updateStatusBarExtension;
 
 // Pasta local que contém todos os projetos
 const projectsRoot = path.resolve(__dirname, "../");
@@ -49,7 +54,9 @@ function updateStatusBar(message, duration = 3000) {
 }
 
 // Inicializa barra de status
-updateStatusBar("✎ Editando...", 3000);
+if(updateStatusBarExtensionConfig){
+    updateStatusBar("✎ Editando...", 3000);
+}
 
 // ------------------------------
 // Função para enviar arquivo para FTP
@@ -84,10 +91,14 @@ async function uploadFile(filePath) {
         await client.uploadFrom(filePath, remoteFilePath);
 
         console.log(`✔ [${projectName}] ${relativePath} enviado!`);
-        updateStatusBar(`✔ [${projectName}] ${relativePath} enviado!`);
+        if(updateStatusBarExtensionConfig){
+            updateStatusBar(`✔ [${projectName}] ${relativePath} enviado!`);
+        }
     } catch (err) {
         console.error(`❌ Erro ao enviar ${filePath}:`, err);
-        updateStatusBar(`❌ Erro ao enviar ${filePath}`);
+        if(updateStatusBarExtensionConfig){
+            updateStatusBar(`❌ Erro ao enviar ${filePath}`);
+        }
     }
 
     client.close();
