@@ -1,13 +1,13 @@
 # Monitoramento de Pastas e Envio FTP
 
-Este script Node.js monitora várias pastas locais e envia automaticamente qualquer arquivo criado ou modificado para um servidor FTP remoto.
+Este script Node.js monitora varias pastas locais e envia automaticamente qualquer arquivo criado ou modificado para um servidor FTP remoto.
 
-Além do envio automático, o terminal também aceita comandos interativos para listar arquivos remotos e baixar arquivos do FTP para a máquina local.
+Alem do envio automatico, o terminal tambem aceita comandos interativos para listar arquivos remotos, baixar arquivos ou pastas do FTP, enviar arquivos ou pastas locais e consultar o historico de envios da sessao.
 
-## Pré-requisitos
+## Pre-requisitos
 
 - [Node.js](https://nodejs.org/)
-- Extensão **Status Bar Text** no VS Code, caso queira exibir mensagens na barra de status
+- Extensao **Status Bar Text** no VS Code, caso queira exibir mensagens na barra de status
 - Pacotes Node.js:
   - `basic-ftp`
   - `chokidar`
@@ -20,23 +20,23 @@ npm install basic-ftp chokidar
 
 ## Estrutura de pastas
 
-Coloque os scripts dentro de uma pasta `.vscode` na raiz que contém seus projetos:
+Coloque os scripts dentro de uma pasta `.vscode` na raiz que contem seus projetos:
 
 ```bash
 raiz-do-projeto/
-├── .vscode/
-│   ├── ftp-watch.js
-│   ├── ftp-watch-settings.json
-│   ├── settings.json
-│   └── updateStatusBar.js
-├── pasta1/
-├── pasta2/
-└── pastaN/
+|-- .vscode/
+|   |-- ftp-watch.js
+|   |-- ftp-watch-settings.json
+|   |-- settings.json
+|   `-- updateStatusBar.js
+|-- pasta1/
+|-- pasta2/
+`-- pastaN/
 ```
 
-## Configuração
+## Configuracao
 
-Configure o arquivo `ftp-watch-settings.json` com as credenciais e informações do FTP:
+Configure o arquivo `ftp-watch-settings.json` com as credenciais e informacoes do FTP:
 
 ```json
 {
@@ -54,7 +54,7 @@ Configure o arquivo `ftp-watch-settings.json` com as credenciais e informações
 
 ## Rodando o script
 
-Dentro da pasta onde está o script, rode:
+Dentro da pasta onde esta o script, rode:
 
 ```bash
 node ftp-watch.js
@@ -66,7 +66,7 @@ Caso ele esteja dentro de `.vscode`, rode a partir da raiz:
 node .vscode/ftp-watch.js
 ```
 
-Ao iniciar, o script continua observando alterações locais e mostra o prompt:
+Ao iniciar, o script continua observando alteracoes locais e mostra o prompt:
 
 ```txt
 ftp>
@@ -80,7 +80,7 @@ Listar a pasta configurada em `rootRemote`:
 ftp> ls
 ```
 
-Listar uma pasta específica dentro de `rootRemote`:
+Listar uma pasta especifica dentro de `rootRemote`:
 
 ```txt
 ftp> ls imagens
@@ -104,14 +104,39 @@ Baixar um arquivo escolhendo o destino local:
 ftp> get /public_html/index.php ./downloads/index.php
 ```
 
-Usar caminhos com espaços:
+Baixar uma pasta do FTP:
+
+```txt
+ftp> get /public_html/assets ./assets
+```
+
+Enviar um arquivo local para o FTP:
+
+```txt
+ftp> put ./index.php /public_html/index.php
+```
+
+Enviar uma pasta local para o FTP:
+
+```txt
+ftp> put ./assets /public_html/assets
+```
+
+Ver o historico de envios feitos neste terminal:
+
+```txt
+ftp> history
+```
+
+Usar caminhos com espacos:
 
 ```txt
 ftp> ls "/public_html/minha pasta"
 ftp> get "/public_html/minha pasta/arquivo.txt" "./downloads/arquivo.txt"
+ftp> put "./minha pasta" "/public_html/minha pasta"
 ```
 
-Ver os comandos disponíveis:
+Ver os comandos disponiveis:
 
 ```txt
 ftp> help
@@ -123,9 +148,10 @@ Encerrar o script:
 ftp> exit
 ```
 
-## Observações
+## Observacoes
 
-- Caminhos remotos que começam com `/` são usados como caminhos absolutos no FTP.
-- Caminhos remotos sem `/` no início são resolvidos a partir de `rootRemote`.
-- O upload automático continua funcionando enquanto o prompt está aberto.
-- Arquivos baixados pelo comando `get` são ignorados pelo upload automático para evitar reenvio imediato.
+- Caminhos remotos que comecam com `/` sao usados como caminhos absolutos no FTP.
+- Caminhos remotos sem `/` no inicio sao resolvidos a partir de `rootRemote`.
+- O upload automatico continua funcionando enquanto o prompt esta aberto.
+- Arquivos e pastas baixados pelo comando `get` sao ignorados temporariamente pelo upload automatico para evitar reenvio imediato.
+- O comando `history` mostra apenas os ultimos 100 envios feitos no terminal atual; o historico nao e salvo ao encerrar o script.
