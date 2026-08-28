@@ -1,62 +1,131 @@
 # Monitoramento de Pastas e Envio FTP
 
-Este script Node.js permite monitorar várias pastas e enviar automaticamente qualquer arquivo modificado para um servidor FTP remoto. Além disso, utiliza a extensão **Status Bar Text** do VS Code para exibir notificações de status diretamente na barra de status.
+Este script Node.js monitora várias pastas locais e envia automaticamente qualquer arquivo criado ou modificado para um servidor FTP remoto.
 
----
+Além do envio automático, o terminal também aceita comandos interativos para listar arquivos remotos e baixar arquivos do FTP para a máquina local.
 
 ## Pré-requisitos
 
-Antes de começar, certifique-se de ter instalado:
-
 - [Node.js](https://nodejs.org/)
-- Extensão **Status Bar Text** no VS Code
+- Extensão **Status Bar Text** no VS Code, caso queira exibir mensagens na barra de status
 - Pacotes Node.js:
   - `basic-ftp`
   - `chokidar`
 
-Você pode instalar os pacotes executando:
+Instale os pacotes com:
 
 ```bash
 npm install basic-ftp chokidar
 ```
+
 ## Estrutura de pastas
-Para que o projeto funcione corretamente como esperado, adicione os scripts dentro de uma pasta **.vscode** dentro da pasta raiz do projeto. Como segue abaixo:
+
+Coloque os scripts dentro de uma pasta `.vscode` na raiz que contém seus projetos:
+
 ```bash
 raiz-do-projeto/
-│
 ├── .vscode/
-│   └── ftp-watch.js
-│   └── ftp-watch-settings.js
-│   └── settings.js
+│   ├── ftp-watch.js
+│   ├── ftp-watch-settings.json
+│   ├── settings.json
 │   └── updateStatusBar.js
 ├── pasta1/
 ├── pasta2/
 └── pastaN/
 ```
-## Inicializando o projeto
-Dentro da pasta raiz do seu projeto rode o seguinte comando para inicializar o projeto node:
-```bash
- npm init -y
-```
-Tendo inicializado o projeto, configure corretamente seu arquivo _ftp-watch-settings.js_, ele deve conter as credenciais e informações do seu servidor ftp de destino.
+
+## Configuração
+
+Configure o arquivo `ftp-watch-settings.json` com as credenciais e informações do FTP:
+
 ```json
 {
-	"ftpUserConfig": {
-		"host": "user.dominio.com.br",
-		"port": 0,
-		"user": "user",
-		"password": "password",
-		"secure": false,
-		"rootRemote": "pathRemote"
-	}
+    "ftpUserConfig": {
+        "host": "user.dominio.com.br",
+        "port": 21,
+        "user": "user",
+        "password": "password",
+        "secure": false,
+        "rootRemote": "/public_html"
+    },
+    "updateStatusBarExtension": false
 }
 ```
+
 ## Rodando o script
-Para rodar o script, dentro da pasta raiz do projeto, rode o seguinte comando:
+
+Dentro da pasta onde está o script, rode:
+
+```bash
+node ftp-watch.js
+```
+
+Caso ele esteja dentro de `.vscode`, rode a partir da raiz:
+
 ```bash
 node .vscode/ftp-watch.js
 ```
-Esse comando pode ser configurado dentro do package json para ser algo mais simples, fica a cargo de quem está rodando o projeto.
 
-## Finalizando
-Ao rodar os comandos e seguir os passos, na barra de status do VsCode irá aparecer a mensagem: ***Editando...*** e sempre que um arquivo for salvo irá exibir o caminho de destino.
+Ao iniciar, o script continua observando alterações locais e mostra o prompt:
+
+```txt
+ftp>
+```
+
+## Comandos interativos
+
+Listar a pasta configurada em `rootRemote`:
+
+```txt
+ftp> ls
+```
+
+Listar uma pasta específica dentro de `rootRemote`:
+
+```txt
+ftp> ls imagens
+```
+
+Listar uma pasta absoluta no FTP:
+
+```txt
+ftp> ls /public_html/imagens
+```
+
+Baixar um arquivo para a pasta atual:
+
+```txt
+ftp> get /public_html/index.php
+```
+
+Baixar um arquivo escolhendo o destino local:
+
+```txt
+ftp> get /public_html/index.php ./downloads/index.php
+```
+
+Usar caminhos com espaços:
+
+```txt
+ftp> ls "/public_html/minha pasta"
+ftp> get "/public_html/minha pasta/arquivo.txt" "./downloads/arquivo.txt"
+```
+
+Ver os comandos disponíveis:
+
+```txt
+ftp> help
+```
+
+Encerrar o script:
+
+```txt
+ftp> exit
+```
+
+## Observações
+
+- Caminhos remotos que começam com `/` são usados como caminhos absolutos no FTP.
+- Caminhos remotos sem `/` no início são resolvidos a partir de `rootRemote`.
+- O upload automático continua funcionando enquanto o prompt está aberto.
+- Arquivos baixados pelo comando `get` são ignorados pelo upload automático para evitar reenvio imediato.
