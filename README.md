@@ -1,6 +1,6 @@
 # Monitoramento de Pastas e Envio FTP
 
-Este script Node.js monitora varias pastas locais e envia automaticamente qualquer arquivo criado ou modificado para um servidor FTP remoto.
+Este script Node.js monitora varias pastas locais e envia automaticamente qualquer arquivo ou pasta criado ou modificado para um servidor FTP remoto.
 
 Alem do envio automatico, o terminal tambem aceita comandos interativos para listar arquivos remotos, baixar arquivos ou pastas do FTP, enviar arquivos ou pastas locais e consultar o historico de envios da sessao.
 
@@ -92,22 +92,34 @@ Listar uma pasta absoluta no FTP:
 ftp> ls /public_html/imagens
 ```
 
-Baixar um arquivo para a pasta atual:
+Baixar um arquivo para o caminho local equivalente ao caminho remoto:
 
 ```txt
-ftp> get /public_html/index.php
+ftp> get /public_html/meu-projeto/index.php
+```
+
+Com `rootRemote` configurado como `/public_html`, o arquivo acima sera baixado/substituido em:
+
+```txt
+../meu-projeto/index.php
 ```
 
 Baixar um arquivo escolhendo o destino local:
 
 ```txt
-ftp> get /public_html/index.php ./downloads/index.php
+ftp> get /public_html/meu-projeto/index.php ./downloads/index.php
 ```
 
-Baixar uma pasta do FTP:
+Baixar uma pasta para o caminho local equivalente ao caminho remoto:
 
 ```txt
-ftp> get /public_html/assets ./assets
+ftp> get /public_html/meu-projeto/assets
+```
+
+Com `rootRemote` configurado como `/public_html`, a pasta acima sera baixada/substituida em:
+
+```txt
+../meu-projeto/assets
 ```
 
 Enviar um arquivo local para o FTP:
@@ -120,6 +132,30 @@ Enviar uma pasta local para o FTP:
 
 ```txt
 ftp> put ./assets /public_html/assets
+```
+
+Enviar uma pasta local para dentro de uma pasta remota existente:
+
+```txt
+ftp> put ./projeto/modulos/financeiro/pasta_teste /public_html/projeto/modulos/financeiro/
+```
+
+O comando acima cria/envia para:
+
+```txt
+/public_html/projeto/modulos/financeiro/pasta_teste
+```
+
+Se o destino remoto informado ja existir como pasta, a barra final e opcional:
+
+```txt
+ftp> put ./projeto/modulos/financeiro/pasta_teste /public_html/projeto/modulos/financeiro
+```
+
+Tambem cria/envia para:
+
+```txt
+/public_html/projeto/modulos/financeiro/pasta_teste
 ```
 
 Ver o historico de envios feitos neste terminal:
@@ -152,6 +188,9 @@ ftp> exit
 
 - Caminhos remotos que comecam com `/` sao usados como caminhos absolutos no FTP.
 - Caminhos remotos sem `/` no inicio sao resolvidos a partir de `rootRemote`.
+- No `get`, quando nenhum destino local e informado e o caminho remoto esta dentro de `rootRemote`, o script baixa para o caminho local equivalente dentro da raiz local dos projetos.
+- No `put` de uma pasta, se o destino remoto termina com `/` ou ja existe como pasta, o script cria a pasta local dentro desse destino remoto.
+- O upload automatico tambem cria pastas novas no FTP quando elas sao criadas localmente.
 - O upload automatico continua funcionando enquanto o prompt esta aberto.
 - Arquivos e pastas baixados pelo comando `get` sao ignorados temporariamente pelo upload automatico para evitar reenvio imediato.
 - O comando `history` mostra apenas os ultimos 100 envios feitos no terminal atual; o historico nao e salvo ao encerrar o script.

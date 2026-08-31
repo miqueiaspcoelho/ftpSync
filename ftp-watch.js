@@ -227,6 +227,41 @@ async function uploadFile(filePath) {
     }
 }
 
+async function uploadDirectory(dirPath) {
+    const normalizedDirPath = path.resolve(dirPath);
+    if (shouldIgnoreDownloadedDir(normalizedDirPath)) {
+        return;
+    }
+
+    try {
+        await withFtpClient(async (client) => {
+            const relativeToRoot = path.relative(projectsRoot, normalizedDirPath);
+            if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot) || relativeToRoot === "") {
+                return;
+            }
+
+            const parts = relativeToRoot.split(path.sep);
+            const projectName = parts[0];
+            const relativePath = parts.slice(1).join("/");
+            const remoteDirPath = path.posix.join(ftpConfig.rootRemote || "/", projectName, relativePath);
+
+            await client.ensureDir(remoteDirPath);
+            addUploadHistory("auto-dir", normalizedDirPath, remoteDirPath);
+
+            const displayPath = relativePath || ".";
+            console.log(`✔ [${projectName}] pasta ${displayPath} criada!`);
+            if (updateStatusBarExtensionConfig) {
+                updateStatusBar(`✔ [${projectName}] pasta ${displayPath} criada!`);
+            }
+        });
+    } catch (err) {
+        console.error(`✖ Erro ao criar pasta ${dirPath}:`, err);
+        if (updateStatusBarExtensionConfig) {
+            updateStatusBar(`✖ Erro ao criar pasta ${dirPath}`);
+        }
+    }
+}
+
 function resolveRemotePath(inputPath = "") {
     if (!inputPath || inputPath === ".") {
         return ftpConfig.rootRemote || "/";
@@ -248,6 +283,13 @@ function resolveLocalDownloadPath(remotePath, localPath) {
         }
 
         return resolvedLocalPath;
+    }
+
+    const rootRemote = ftpConfig.rootRemote || "/";
+    const relativeToRoot = path.posix.relative(rootRemote, remotePath);
+
+    if (relativeToRoot && !relativeToRoot.startsWith("..") && !path.posix.isAbsolute(relativeToRoot)) {
+        return path.join(projectsRoot, ...relativeToRoot.split("/"));
     }
 
     return path.resolve(process.cwd(), path.posix.basename(remotePath));
@@ -274,6 +316,21 @@ function resolveRemoteUploadPath(localPath, remotePathInput) {
     }
 
     return path.posix.join(ftpConfig.rootRemote || "/", path.basename(normalizedLocalPath));
+}
+
+async function resolveRemoteUploadTarget(client, localPath, localStats, remotePathInput) {
+    const remotePath = resolveRemoteUploadPath(localPath, remotePathInput);
+
+    if (!localStats.isDirectory() || !remotePathInput || remotePathInput.endsWith("/") || remotePathInput.endsWith("\\")) {
+        return remotePath;
+    }
+
+    const remoteItems = await tryListRemote(client, remotePath);
+    if (remoteItems !== null) {
+        return path.posix.join(remotePath, path.basename(localPath));
+    }
+
+    return remotePath;
 }
 
 async function listRemote(remotePathInput) {
@@ -418,9 +475,10 @@ async function uploadLocal(localPathInput, remotePathInput) {
     }
 
     const localStats = fs.statSync(localPath);
-    const remotePath = resolveRemoteUploadPath(localPath, remotePathInput);
 
     await withFtpClient(async (client) => {
+        const remotePath = await resolveRemoteUploadTarget(client, localPath, localStats, remotePathInput);
+
         if (localStats.isDirectory()) {
             await uploadLocalDirectory(client, localPath, remotePath);
             console.log(`✔ Pasta enviada: ${localPath} -> ${remotePath}`);
@@ -533,6 +591,7 @@ function startCommandPrompt() {
 // ------------------------------
 const watcher = chokidar.watch(projectsRoot, { ignored, ignoreInitial: true });
 
+watcher.on('addDir', uploadDirectory);
 watcher.on('add', uploadFile);
 watcher.on('change', uploadFile);
 
