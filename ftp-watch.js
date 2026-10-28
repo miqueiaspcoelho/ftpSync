@@ -39,6 +39,38 @@ const downloadedDirs = new Map();
 const downloadedFileIgnoreMs = 5000;
 const uploadHistory = [];
 const uploadHistoryLimit = 100;
+let uploadQueue = Promise.resolve();
+let queuedUploadCount = 0;
+
+// O chokidar pode disparar dezenas ou centenas de eventos de uma vez. O FTP
+// aceita apenas um envio por cliente com seguranca, por isso todos os uploads
+// passam por esta fila global, na mesma ordem em que foram detectados.
+function enqueueUpload(description, task) {
+    queuedUploadCount += 1;
+    console.log(`⌛ Na fila (${queuedUploadCount}): ${description}`);
+
+    const queuedTask = uploadQueue.then(async () => {
+        console.log(`↑ Enviando: ${description}`);
+        return task();
+    });
+
+    // Mantem a fila ativa mesmo se um item falhar; o erro continua sendo
+    // devolvido para quem colocou este item na fila.
+    uploadQueue = queuedTask.catch(() => undefined);
+
+    return queuedTask.finally(() => {
+        queuedUploadCount -= 1;
+    });
+}
+
+function showUploadQueue() {
+    if (queuedUploadCount === 0) {
+        console.log("Nenhum envio aguardando na fila.");
+        return;
+    }
+
+    console.log(`${queuedUploadCount} envio(s) aguardando ou em andamento.`);
+}
 
 function addUploadHistory(type, localPath, remotePath) {
     uploadHistory.push({
@@ -195,8 +227,9 @@ async function uploadFile(filePath) {
         return;
     }
 
-    try {
-        await withFtpClient(async (client) => {
+    return enqueueUpload(`arquivo ${normalizedFilePath}`, async () => {
+        try {
+            await withFtpClient(async (client) => {
             // Determina o projeto (subpasta)
             const relativeToRoot = path.relative(projectsRoot, filePath);
             const parts = relativeToRoot.split(path.sep);
@@ -218,13 +251,14 @@ async function uploadFile(filePath) {
             if (updateStatusBarExtensionConfig) {
                 updateStatusBar(`✔ [${projectName}] ${relativePath} enviado!`);
             }
-        });
-    } catch (err) {
-        console.error(`✖ Erro ao enviar ${filePath}:`, err);
-        if (updateStatusBarExtensionConfig) {
-            updateStatusBar(`✖ Erro ao enviar ${filePath}`);
+            });
+        } catch (err) {
+            console.error(`✖ Erro ao enviar ${filePath}:`, err);
+            if (updateStatusBarExtensionConfig) {
+                updateStatusBar(`✖ Erro ao enviar ${filePath}`);
+            }
         }
-    }
+    });
 }
 
 async function uploadDirectory(dirPath) {
@@ -233,8 +267,9 @@ async function uploadDirectory(dirPath) {
         return;
     }
 
-    try {
-        await withFtpClient(async (client) => {
+    return enqueueUpload(`pasta ${normalizedDirPath}`, async () => {
+        try {
+            await withFtpClient(async (client) => {
             const relativeToRoot = path.relative(projectsRoot, normalizedDirPath);
             if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot) || relativeToRoot === "") {
                 return;
@@ -253,13 +288,14 @@ async function uploadDirectory(dirPath) {
             if (updateStatusBarExtensionConfig) {
                 updateStatusBar(`✔ [${projectName}] pasta ${displayPath} criada!`);
             }
-        });
-    } catch (err) {
-        console.error(`✖ Erro ao criar pasta ${dirPath}:`, err);
-        if (updateStatusBarExtensionConfig) {
-            updateStatusBar(`✖ Erro ao criar pasta ${dirPath}`);
+            });
+        } catch (err) {
+            console.error(`✖ Erro ao criar pasta ${dirPath}:`, err);
+            if (updateStatusBarExtensionConfig) {
+                updateStatusBar(`✖ Erro ao criar pasta ${dirPath}`);
+            }
         }
-    }
+    });
 }
 
 function resolveRemotePath(inputPath = "") {
@@ -457,6 +493,10 @@ async function uploadLocalDirectory(client, localDir, remoteDir) {
             await client.ensureDir(path.posix.dirname(remoteItemPath));
             await client.uploadFrom(localItemPath, remoteItemPath);
             addUploadHistory("manual", localItemPath, remoteItemPath);
+            console.log(`✔ Enviado: ${localItemPath} -> ${remoteItemPath}`);
+            if (updateStatusBarExtensionConfig) {
+                updateStatusBar(`✔ Enviado: ${path.basename(localItemPath)}`);
+            }
         }
     }
 }
@@ -476,24 +516,29 @@ async function uploadLocal(localPathInput, remotePathInput) {
 
     const localStats = fs.statSync(localPath);
 
-    await withFtpClient(async (client) => {
-        const remotePath = await resolveRemoteUploadTarget(client, localPath, localStats, remotePathInput);
+    return enqueueUpload(`envio manual ${localPath}`, async () => {
+        await withFtpClient(async (client) => {
+            const remotePath = await resolveRemoteUploadTarget(client, localPath, localStats, remotePathInput);
 
-        if (localStats.isDirectory()) {
-            await uploadLocalDirectory(client, localPath, remotePath);
-            console.log(`✔ Pasta enviada: ${localPath} -> ${remotePath}`);
-            return;
-        }
+            if (localStats.isDirectory()) {
+                await uploadLocalDirectory(client, localPath, remotePath);
+                console.log(`✔ Pasta enviada: ${localPath} -> ${remotePath}`);
+                return;
+            }
 
-        if (!localStats.isFile()) {
-            console.log(`Caminho local nao e arquivo nem pasta: ${localPath}`);
-            return;
-        }
+            if (!localStats.isFile()) {
+                console.log(`Caminho local nao e arquivo nem pasta: ${localPath}`);
+                return;
+            }
 
-        await client.ensureDir(path.posix.dirname(remotePath));
-        await client.uploadFrom(localPath, remotePath);
-        addUploadHistory("manual", localPath, remotePath);
-        console.log(`✔ Enviado: ${localPath} -> ${remotePath}`);
+            await client.ensureDir(path.posix.dirname(remotePath));
+            await client.uploadFrom(localPath, remotePath);
+            addUploadHistory("manual", localPath, remotePath);
+            console.log(`✔ Enviado: ${localPath} -> ${remotePath}`);
+            if (updateStatusBarExtensionConfig) {
+                updateStatusBar(`✔ Enviado: ${path.basename(localPath)}`);
+            }
+        });
     });
 }
 
@@ -529,6 +574,7 @@ Comandos disponiveis:
   get <arquivo-ou-pasta-remota> [destino-local] Baixa arquivo ou pasta do FTP
   put <arquivo-ou-pasta-local> [destino-remoto] Envia arquivo ou pasta para o FTP
   history                                        Mostra os ultimos envios deste terminal
+  queue                                          Mostra o estado da fila de envios
   help                                           Mostra esta ajuda
   exit                                           Encerra o script
 
@@ -565,6 +611,8 @@ function startCommandPrompt() {
                 await uploadLocal(args[0], args[1]);
             } else if (command === 'history') {
                 showUploadHistory();
+            } else if (command === 'queue') {
+                showUploadQueue();
             } else if (command === 'help') {
                 showHelp();
             } else if (command === 'exit' || command === 'quit') {
