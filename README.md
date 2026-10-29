@@ -48,7 +48,8 @@ Configure o arquivo `ftp-watch-settings.json` com as credenciais e informacoes d
         "secure": false,
         "rootRemote": "/public_html"
     },
-    "updateStatusBarExtension": false
+    "updateStatusBarExtension": false,
+    "uploadConcurrency": 3
 }
 ```
 
@@ -197,7 +198,9 @@ ftp> exit
 - No `get`, quando nenhum destino local e informado e o caminho remoto esta dentro de `rootRemote`, o script baixa para o caminho local equivalente dentro da raiz local dos projetos.
 - No `put` de uma pasta, se o destino remoto termina com `/` ou ja existe como pasta, o script cria a pasta local dentro desse destino remoto.
 - O upload automatico tambem cria pastas novas no FTP quando elas sao criadas localmente.
-- Todos os uploads automaticos e manuais passam por uma fila unica. Assim, ao adicionar um projeto grande, apenas um arquivo ou pasta e enviado por vez, evitando conexoes FTP concorrentes. O terminal informa quando cada item entra na fila, inicia e conclui o envio; em pastas, cada arquivo concluido tambem e informado.
+- Todos os uploads automaticos e manuais passam por uma fila unica com workers FTP persistentes. Por padrao, sao usadas tres conexoes simultaneas (`uploadConcurrency`), cada uma reutilizada para muitos arquivos. Isso elimina a autenticacao por arquivo e melhora muito projetos grandes com milhares de arquivos pequenos.
+- Se o provedor FTP limitar conexoes, reduza `uploadConcurrency` para `1` ou `2`. Se o servidor e a rede suportarem mais conexoes, experimente `4`; valores maiores podem piorar a vazao ou causar bloqueios no servidor.
+- Diretorios remotos ja criados por um worker sao mantidos em cache naquela conexao, evitando comandos FTP repetidos. O terminal mostra progresso a cada 100 arquivos para nao comprometer a vazao com milhares de linhas de log.
 - O upload automatico continua funcionando enquanto o prompt esta aberto.
 - Arquivos e pastas baixados pelo comando `get` sao ignorados temporariamente pelo upload automatico para evitar reenvio imediato.
 - O comando `history` mostra apenas os ultimos 100 envios feitos no terminal atual; o historico nao e salvo ao encerrar o script.

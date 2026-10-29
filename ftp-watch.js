@@ -39,28 +39,95 @@ const downloadedDirs = new Map();
 const downloadedFileIgnoreMs = 5000;
 const uploadHistory = [];
 const uploadHistoryLimit = 100;
-let uploadQueue = Promise.resolve();
+// Tres conexoes persistentes oferecem grande ganho em arvores com milhares de
+// arquivos pequenos, sem normalmente exceder o limite de hosts compartilhados.
+const uploadConcurrency = Math.max(1, Number(userFtpConfig.uploadConcurrency) || 3);
+const uploadQueue = [];
+let activeUploadWorkers = 0;
 let queuedUploadCount = 0;
+let completedUploadCount = 0;
 
-// O chokidar pode disparar dezenas ou centenas de eventos de uma vez. O FTP
-// aceita apenas um envio por cliente com seguranca, por isso todos os uploads
-// passam por esta fila global, na mesma ordem em que foram detectados.
+function reportUploadProgress() {
+    completedUploadCount += 1;
+    // Milhares de writes no terminal tambem reduzem a vazao total.
+    if (completedUploadCount === 1 || completedUploadCount % 100 === 0) {
+        console.log(`↑ Uploads concluidos nesta sessao: ${completedUploadCount} (fila: ${queuedUploadCount})`);
+    }
+}
+
+async function ensureRemoteDir(client, ensuredDirs, remoteDir) {
+    if (!ensuredDirs.has(remoteDir)) {
+        await client.ensureDir(remoteDir);
+        ensuredDirs.add(remoteDir);
+    }
+}
+
+async function startUploadWorker() {
+    activeUploadWorkers += 1;
+    const client = new ftp.Client();
+    client.ftp.verbose = false;
+    const ensuredDirs = new Set();
+
+    try {
+        await client.access({
+            host: ftpConfig.host,
+            port: ftpConfig.port,
+            user: ftpConfig.user,
+            password: ftpConfig.password,
+            secure: ftpConfig.secure
+        });
+
+        while (uploadQueue.length > 0) {
+            const job = uploadQueue.shift();
+            try {
+                await job.task(client, ensuredDirs);
+                job.resolve();
+            } catch (err) {
+                job.reject(err);
+            } finally {
+                queuedUploadCount -= 1;
+            }
+        }
+    } catch (err) {
+        console.error("Erro na conexao do worker FTP:", err.message);
+        // Se a conexao inicial falhar, nao deixe promises da fila penduradas.
+        // Outros workers ja conectados continuam processando seus itens.
+        if (activeUploadWorkers === 1) {
+            while (uploadQueue.length > 0) {
+                const job = uploadQueue.shift();
+                queuedUploadCount -= 1;
+                job.reject(err);
+            }
+        }
+    } finally {
+        client.close();
+        activeUploadWorkers -= 1;
+        if (uploadQueue.length > 0) {
+            // Evita um loop agressivo de reconexao quando o servidor estiver indisponivel.
+            setTimeout(scheduleUploadWorkers, 1000);
+        }
+    }
+}
+
+function scheduleUploadWorkers() {
+    while (uploadQueue.length > 0 && activeUploadWorkers < uploadConcurrency) {
+        startUploadWorker();
+    }
+}
+
+// O chokidar pode disparar milhares de eventos em uma importacao. Os workers
+// reutilizam a mesma conexao em vez de autenticar uma vez por arquivo.
 function enqueueUpload(description, task) {
     queuedUploadCount += 1;
-    console.log(`⌛ Na fila (${queuedUploadCount}): ${description}`);
+    if (queuedUploadCount === 1 || queuedUploadCount % 100 === 0) {
+        console.log(`⌛ Na fila: ${queuedUploadCount} item(ns). Workers: ${activeUploadWorkers}/${uploadConcurrency}`);
+    }
 
-    const queuedTask = uploadQueue.then(async () => {
-        console.log(`↑ Enviando: ${description}`);
-        return task();
+    const queuedTask = new Promise((resolve, reject) => {
+        uploadQueue.push({ description, task, resolve, reject });
     });
-
-    // Mantem a fila ativa mesmo se um item falhar; o erro continua sendo
-    // devolvido para quem colocou este item na fila.
-    uploadQueue = queuedTask.catch(() => undefined);
-
-    return queuedTask.finally(() => {
-        queuedUploadCount -= 1;
-    });
+    scheduleUploadWorkers();
+    return queuedTask;
 }
 
 function showUploadQueue() {
@@ -69,7 +136,7 @@ function showUploadQueue() {
         return;
     }
 
-    console.log(`${queuedUploadCount} envio(s) aguardando ou em andamento.`);
+    console.log(`${queuedUploadCount} envio(s) aguardando ou em andamento. Workers: ${activeUploadWorkers}/${uploadConcurrency}.`);
 }
 
 function addUploadHistory(type, localPath, remotePath) {
@@ -227,9 +294,8 @@ async function uploadFile(filePath) {
         return;
     }
 
-    return enqueueUpload(`arquivo ${normalizedFilePath}`, async () => {
+    return enqueueUpload(`arquivo ${normalizedFilePath}`, async (client, ensuredDirs) => {
         try {
-            await withFtpClient(async (client) => {
             // Determina o projeto (subpasta)
             const relativeToRoot = path.relative(projectsRoot, filePath);
             const parts = relativeToRoot.split(path.sep);
@@ -241,17 +307,16 @@ async function uploadFile(filePath) {
             const remoteFilePath = path.posix.join(ftpConfig.rootRemote, projectName, relativePath);
 
             // Cria pastas remotas caso não existam
-            await client.ensureDir(path.posix.dirname(remoteFilePath));
+            await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remoteFilePath));
 
             // Envia o arquivo
             await client.uploadFrom(filePath, remoteFilePath);
             addUploadHistory("auto", path.resolve(filePath), remoteFilePath);
 
-            console.log(`✔ [${projectName}] ${relativePath} enviado!`);
+            reportUploadProgress();
             if (updateStatusBarExtensionConfig) {
                 updateStatusBar(`✔ [${projectName}] ${relativePath} enviado!`);
             }
-            });
         } catch (err) {
             console.error(`✖ Erro ao enviar ${filePath}:`, err);
             if (updateStatusBarExtensionConfig) {
@@ -267,9 +332,8 @@ async function uploadDirectory(dirPath) {
         return;
     }
 
-    return enqueueUpload(`pasta ${normalizedDirPath}`, async () => {
+    return enqueueUpload(`pasta ${normalizedDirPath}`, async (client, ensuredDirs) => {
         try {
-            await withFtpClient(async (client) => {
             const relativeToRoot = path.relative(projectsRoot, normalizedDirPath);
             if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot) || relativeToRoot === "") {
                 return;
@@ -280,7 +344,7 @@ async function uploadDirectory(dirPath) {
             const relativePath = parts.slice(1).join("/");
             const remoteDirPath = path.posix.join(ftpConfig.rootRemote || "/", projectName, relativePath);
 
-            await client.ensureDir(remoteDirPath);
+            await ensureRemoteDir(client, ensuredDirs, remoteDirPath);
             addUploadHistory("auto-dir", normalizedDirPath, remoteDirPath);
 
             const displayPath = relativePath || ".";
@@ -288,7 +352,6 @@ async function uploadDirectory(dirPath) {
             if (updateStatusBarExtensionConfig) {
                 updateStatusBar(`✔ [${projectName}] pasta ${displayPath} criada!`);
             }
-            });
         } catch (err) {
             console.error(`✖ Erro ao criar pasta ${dirPath}:`, err);
             if (updateStatusBarExtensionConfig) {
@@ -475,8 +538,8 @@ async function downloadRemote(remotePathInput, localPathInput) {
     });
 }
 
-async function uploadLocalDirectory(client, localDir, remoteDir) {
-    await client.ensureDir(remoteDir);
+async function uploadLocalDirectory(client, ensuredDirs, localDir, remoteDir) {
+    await ensureRemoteDir(client, ensuredDirs, remoteDir);
 
     const items = fs.readdirSync(localDir, { withFileTypes: true });
 
@@ -485,18 +548,15 @@ async function uploadLocalDirectory(client, localDir, remoteDir) {
         const remoteItemPath = path.posix.join(remoteDir, item.name);
 
         if (item.isDirectory()) {
-            await uploadLocalDirectory(client, localItemPath, remoteItemPath);
+            await uploadLocalDirectory(client, ensuredDirs, localItemPath, remoteItemPath);
             continue;
         }
 
         if (item.isFile()) {
-            await client.ensureDir(path.posix.dirname(remoteItemPath));
+            await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remoteItemPath));
             await client.uploadFrom(localItemPath, remoteItemPath);
             addUploadHistory("manual", localItemPath, remoteItemPath);
-            console.log(`✔ Enviado: ${localItemPath} -> ${remoteItemPath}`);
-            if (updateStatusBarExtensionConfig) {
-                updateStatusBar(`✔ Enviado: ${path.basename(localItemPath)}`);
-            }
+            reportUploadProgress();
         }
     }
 }
@@ -516,12 +576,11 @@ async function uploadLocal(localPathInput, remotePathInput) {
 
     const localStats = fs.statSync(localPath);
 
-    return enqueueUpload(`envio manual ${localPath}`, async () => {
-        await withFtpClient(async (client) => {
+    return enqueueUpload(`envio manual ${localPath}`, async (client, ensuredDirs) => {
             const remotePath = await resolveRemoteUploadTarget(client, localPath, localStats, remotePathInput);
 
             if (localStats.isDirectory()) {
-                await uploadLocalDirectory(client, localPath, remotePath);
+                await uploadLocalDirectory(client, ensuredDirs, localPath, remotePath);
                 console.log(`✔ Pasta enviada: ${localPath} -> ${remotePath}`);
                 return;
             }
@@ -531,14 +590,13 @@ async function uploadLocal(localPathInput, remotePathInput) {
                 return;
             }
 
-            await client.ensureDir(path.posix.dirname(remotePath));
+            await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remotePath));
             await client.uploadFrom(localPath, remotePath);
             addUploadHistory("manual", localPath, remotePath);
             console.log(`✔ Enviado: ${localPath} -> ${remotePath}`);
             if (updateStatusBarExtensionConfig) {
                 updateStatusBar(`✔ Enviado: ${path.basename(localPath)}`);
             }
-        });
     });
 }
 

@@ -7,5 +7,6 @@
         "secure": false,
         "rootRemote": ""  
     },
-    "updateStatusBarExtension" : false
+    "updateStatusBarExtension" : false,
+    "uploadConcurrency": 3
 }
