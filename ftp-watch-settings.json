@@ -8,5 +8,6 @@
         "rootRemote": ""  
     },
     "updateStatusBarExtension" : false,
-    "uploadConcurrency": 3
+    "uploadConcurrency": 3,
+    "ignoredFolderNames": ["config"]
 }

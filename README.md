@@ -49,9 +49,12 @@ Configure o arquivo `ftp-watch-settings.json` com as credenciais e informacoes d
         "rootRemote": "/public_html"
     },
     "updateStatusBarExtension": false,
-    "uploadConcurrency": 3
+    "uploadConcurrency": 3,
+    "ignoredFolderNames": ["config"]
 }
 ```
+
+`ignoredFolderNames` recebe nomes de pastas, sem caminho. Por exemplo, `"config"` impede o upload automatico e manual de qualquer pasta com esse nome, em qualquer projeto monitorado.
 
 ## Rodando o script
 

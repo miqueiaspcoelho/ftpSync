@@ -31,6 +31,11 @@ const projectsRoot = path.resolve(__dirname, "../");
 
 // Pastas que queremos ignorar
 const ignored = /node_modules|\.vscode|\.git/;
+const ignoredFolderNames = new Set(
+    (Array.isArray(userFtpConfig.ignoredFolderNames) ? userFtpConfig.ignoredFolderNames : [])
+        .filter((folderName) => typeof folderName === "string" && folderName.trim())
+        .map((folderName) => folderName.trim().toLowerCase())
+);
 
 // Caminho do script de status bar
 const statusScript = path.join(__dirname, "updateStatusBar.js");
@@ -46,6 +51,24 @@ const uploadQueue = [];
 let activeUploadWorkers = 0;
 let queuedUploadCount = 0;
 let completedUploadCount = 0;
+
+function hasIgnoredFolderName(localPath, includePathName) {
+    if (ignoredFolderNames.size === 0) {
+        return false;
+    }
+
+    const relativePath = path.relative(projectsRoot, path.resolve(localPath));
+    if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+        return false;
+    }
+
+    const pathParts = relativePath.split(path.sep);
+    if (!includePathName) {
+        pathParts.pop();
+    }
+
+    return pathParts.some((pathPart) => ignoredFolderNames.has(pathPart.toLowerCase()));
+}
 
 function reportUploadProgress() {
     completedUploadCount += 1;
@@ -294,7 +317,7 @@ async function withFtpClient(callback) {
 async function uploadFile(filePath) {
     const normalizedFilePath = path.resolve(filePath);
     let remoteFilePath = "";
-    if (shouldIgnoreDownloadedFile(normalizedFilePath) || shouldIgnoreDownloadedDir(normalizedFilePath)) {
+    if (shouldIgnoreDownloadedFile(normalizedFilePath) || shouldIgnoreDownloadedDir(normalizedFilePath) || hasIgnoredFolderName(normalizedFilePath, false)) {
         return;
     }
 
@@ -333,7 +356,7 @@ async function uploadFile(filePath) {
 
 async function uploadDirectory(dirPath) {
     const normalizedDirPath = path.resolve(dirPath);
-    if (shouldIgnoreDownloadedDir(normalizedDirPath)) {
+    if (shouldIgnoreDownloadedDir(normalizedDirPath) || hasIgnoredFolderName(normalizedDirPath, true)) {
         return;
     }
 
@@ -544,6 +567,10 @@ async function downloadRemote(remotePathInput, localPathInput) {
 }
 
 async function uploadLocalDirectory(client, ensuredDirs, localDir, remoteDir) {
+    if (hasIgnoredFolderName(localDir, true)) {
+        return;
+    }
+
     await ensureRemoteDir(client, ensuredDirs, remoteDir);
 
     const items = fs.readdirSync(localDir, { withFileTypes: true });
@@ -551,6 +578,10 @@ async function uploadLocalDirectory(client, ensuredDirs, localDir, remoteDir) {
     for (const item of items) {
         const localItemPath = path.join(localDir, item.name);
         const remoteItemPath = path.posix.join(remoteDir, item.name);
+
+        if (hasIgnoredFolderName(localItemPath, item.isDirectory())) {
+            continue;
+        }
 
         if (item.isDirectory()) {
             await uploadLocalDirectory(client, ensuredDirs, localItemPath, remoteItemPath);
@@ -585,6 +616,10 @@ async function uploadLocal(localPathInput, remotePathInput) {
     }
 
     const localStats = fs.statSync(localPath);
+    if (hasIgnoredFolderName(localPath, localStats.isDirectory())) {
+        console.log(`Pasta ignorada pela configuracao: ${localPath}`);
+        return;
+    }
 
     return enqueueUpload(`envio manual ${localPath}`, async (client, ensuredDirs) => {
             const remotePath = await resolveRemoteUploadTarget(client, localPath, localStats, remotePathInput);
@@ -710,7 +745,10 @@ function startCommandPrompt() {
 // ------------------------------
 // Inicializa watcher
 // ------------------------------
-const watcher = chokidar.watch(projectsRoot, { ignored, ignoreInitial: true });
+const watcher = chokidar.watch(projectsRoot, {
+    ignored: (localPath, stats) => ignored.test(localPath) || Boolean(stats && stats.isDirectory() && hasIgnoredFolderName(localPath, true)),
+    ignoreInitial: true
+});
 
 watcher.on('addDir', uploadDirectory);
 watcher.on('add', uploadFile);
