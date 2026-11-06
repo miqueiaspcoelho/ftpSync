@@ -203,4 +203,4 @@ ftp> exit
 - Diretorios remotos ja criados por um worker sao mantidos em cache naquela conexao, evitando comandos FTP repetidos. O terminal mostra progresso a cada 100 arquivos para nao comprometer a vazao com milhares de linhas de log.
 - O upload automatico continua funcionando enquanto o prompt esta aberto.
 - Arquivos e pastas baixados pelo comando `get` sao ignorados temporariamente pelo upload automatico para evitar reenvio imediato.
-- O comando `history` mostra apenas os ultimos 100 envios feitos no terminal atual; o historico nao e salvo ao encerrar o script.
+- O comando `history` mostra os ultimos 100 envios feitos no terminal atual, incluindo o resultado de cada arquivo (`OK` ou `FALHOU`); o historico nao e salvo ao encerrar o script.

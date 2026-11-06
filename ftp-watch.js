@@ -139,12 +139,14 @@ function showUploadQueue() {
     console.log(`${queuedUploadCount} envio(s) aguardando ou em andamento. Workers: ${activeUploadWorkers}/${uploadConcurrency}.`);
 }
 
-function addUploadHistory(type, localPath, remotePath) {
+function addUploadHistory(type, localPath, remotePath, status = "sucesso", error = "") {
     uploadHistory.push({
         time: new Date(),
         type,
         localPath,
-        remotePath
+        remotePath,
+        status,
+        error
     });
 
     if (uploadHistory.length > uploadHistoryLimit) {
@@ -162,7 +164,8 @@ function showUploadHistory() {
 
     uploadHistory.forEach((item, index) => {
         const time = item.time.toLocaleTimeString("pt-BR", { hour12: false });
-        console.log(`${String(index + 1).padStart(3, " ")}. ${time} [${item.type}] ${item.localPath} -> ${item.remotePath}`);
+        const result = item.status === "sucesso" ? "OK" : `FALHOU: ${item.error}`;
+        console.log(`${String(index + 1).padStart(3, " ")}. ${time} [${item.type}] [${result}] ${item.localPath} -> ${item.remotePath}`);
     });
 }
 
@@ -290,6 +293,7 @@ async function withFtpClient(callback) {
 // ------------------------------
 async function uploadFile(filePath) {
     const normalizedFilePath = path.resolve(filePath);
+    let remoteFilePath = "";
     if (shouldIgnoreDownloadedFile(normalizedFilePath) || shouldIgnoreDownloadedDir(normalizedFilePath)) {
         return;
     }
@@ -304,7 +308,7 @@ async function uploadFile(filePath) {
             const projectName = parts[0];
             const relativePath = parts.slice(1).join("/");
 
-            const remoteFilePath = path.posix.join(ftpConfig.rootRemote, projectName, relativePath);
+            remoteFilePath = path.posix.join(ftpConfig.rootRemote, projectName, relativePath);
 
             // Cria pastas remotas caso não existam
             await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remoteFilePath));
@@ -318,6 +322,7 @@ async function uploadFile(filePath) {
                 updateStatusBar(`✔ [${projectName}] ${relativePath} enviado!`);
             }
         } catch (err) {
+            addUploadHistory("auto", normalizedFilePath, remoteFilePath, "falhou", err.message);
             console.error(`✖ Erro ao enviar ${filePath}:`, err);
             if (updateStatusBarExtensionConfig) {
                 updateStatusBar(`✖ Erro ao enviar ${filePath}`);
@@ -553,10 +558,15 @@ async function uploadLocalDirectory(client, ensuredDirs, localDir, remoteDir) {
         }
 
         if (item.isFile()) {
-            await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remoteItemPath));
-            await client.uploadFrom(localItemPath, remoteItemPath);
-            addUploadHistory("manual", localItemPath, remoteItemPath);
-            reportUploadProgress();
+            try {
+                await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remoteItemPath));
+                await client.uploadFrom(localItemPath, remoteItemPath);
+                addUploadHistory("manual", localItemPath, remoteItemPath);
+                reportUploadProgress();
+            } catch (err) {
+                addUploadHistory("manual", localItemPath, remoteItemPath, "falhou", err.message);
+                throw err;
+            }
         }
     }
 }
@@ -590,12 +600,17 @@ async function uploadLocal(localPathInput, remotePathInput) {
                 return;
             }
 
-            await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remotePath));
-            await client.uploadFrom(localPath, remotePath);
-            addUploadHistory("manual", localPath, remotePath);
-            console.log(`✔ Enviado: ${localPath} -> ${remotePath}`);
-            if (updateStatusBarExtensionConfig) {
-                updateStatusBar(`✔ Enviado: ${path.basename(localPath)}`);
+            try {
+                await ensureRemoteDir(client, ensuredDirs, path.posix.dirname(remotePath));
+                await client.uploadFrom(localPath, remotePath);
+                addUploadHistory("manual", localPath, remotePath);
+                console.log(`✔ Enviado: ${localPath} -> ${remotePath}`);
+                if (updateStatusBarExtensionConfig) {
+                    updateStatusBar(`✔ Enviado: ${path.basename(localPath)}`);
+                }
+            } catch (err) {
+                addUploadHistory("manual", localPath, remotePath, "falhou", err.message);
+                throw err;
             }
     });
 }
